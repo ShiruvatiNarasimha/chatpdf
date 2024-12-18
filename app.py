@@ -1,3 +1,5 @@
+
+
 import streamlit as st
 import os
 from PyPDF2 import PdfReader
@@ -13,15 +15,13 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Error handling for environment variables
-def load_api_key():
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        st.error("Please set the GOOGLE_API_KEY environment variable")
-        st.stop()
-    return api_key
+# Configure Streamlit page
+st.set_page_config(page_title="Chat PDF 💬", page_icon="📄")
 
 def get_pdf_text(pdf_docs):
+    """
+    Extract text from uploaded PDF files
+    """
     text = ""
     for pdf in pdf_docs:
         try:
@@ -33,6 +33,9 @@ def get_pdf_text(pdf_docs):
     return text
 
 def get_text_chunks(text):
+    """
+    Split text into manageable chunks
+    """
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=10000, 
         chunk_overlap=1000
@@ -41,51 +44,96 @@ def get_text_chunks(text):
     return chunks
 
 def get_vector_store(text_chunks):
+    """
+    Create vector embeddings for text chunks
+    """
     try:
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        # Ensure we have text chunks
+        if not text_chunks:
+            st.error("No text chunks to process")
+            return None
+
+        # Create embeddings
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001", 
+            google_api_key=os.getenv("GOOGLE_API_KEY")
+        )
+
+        # Create vector store
         vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
+        
+        # Save vector store locally
         vector_store.save_local("faiss_index")
+        
         return vector_store
+    
     except Exception as e:
         st.error(f"Error creating vector store: {e}")
         return None
 
 def get_conversational_chain():
+    """
+    Create prompt template and load QA chain
+    """
     prompt_template = """
-    Answer the question as detailed as possible from the provided context. 
-    If the answer is not in the provided context, say "Answer is not available in the context", 
-    and do not provide a wrong answer.
+    Use the following context to answer the question as precisely as possible. 
+    If the answer is not found in the context, clearly state "Information not available in the PDF".
 
     Context:\n {context}\n
     Question: \n{question}\n
 
-    Answer:
+    Detailed Answer:
     """
 
+    # Initialize Gemini model
     model = ChatGoogleGenerativeAI(
         model="gemini-pro",
-        temperature=0.3
+        temperature=0.3,
+        google_api_key=os.getenv("GOOGLE_API_KEY")
     )
 
+    # Create prompt
     prompt = PromptTemplate(
         template=prompt_template, 
         input_variables=["context", "question"]
     )
     
+    # Load QA chain
     chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
     return chain
 
 def user_input(user_question):
+    """
+    Process user question and generate response
+    """
     try:
-        # Load embeddings
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        # Check if API key is set
+        if not os.getenv("GOOGLE_API_KEY"):
+            st.error("Google API Key not found. Please set it in .env file.")
+            return
+
+        # Create embeddings
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001", 
+            google_api_key=os.getenv("GOOGLE_API_KEY")
+        )
         
-        # Load existing vector store with safe deserialization
-        new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
+        # Load vector store
+        try:
+            new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
+        except Exception as load_error:
+            st.error(f"Error loading vector store: {load_error}")
+            st.error("Please upload and process PDFs first.")
+            return
         
         # Perform similarity search
         docs = new_db.similarity_search(user_question)
         
+        # If no relevant documents found
+        if not docs:
+            st.warning("No relevant information found in the uploaded PDFs.")
+            return
+
         # Get conversational chain
         chain = get_conversational_chain()
         
@@ -102,28 +150,29 @@ def user_input(user_question):
         st.error(f"Error processing your question: {e}")
 
 def main():
-    # Set up the Streamlit page
-    st.set_page_config(page_title="Chat with PDF", page_icon="📄")
+    # Page title
     st.header("Chat with PDF using Gemini 💁")
 
-    # Load API Key
-    api_key = load_api_key()
-    
+    # Check for API key
+    if not os.getenv("GOOGLE_API_KEY"):
+        st.error("Please set GOOGLE_API_KEY in your .env file")
+        return
+
     # Configure Generative AI
-    genai.configure(api_key=api_key)
+    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
     # Sidebar for PDF upload
     with st.sidebar:
-        st.title("Menu:")
+        st.title("PDF Processing Menu:")
         pdf_docs = st.file_uploader(
-            "Upload your PDF Files and Click on the Submit & Process Button", 
+            "Upload PDF Files", 
             type=['pdf'],
             accept_multiple_files=True
         )
         
-        if st.button("Submit & Process"):
+        if st.button("Process PDFs"):
             if pdf_docs:
-                with st.spinner("Processing..."):
+                with st.spinner("Processing PDFs..."):
                     # Extract text from PDFs
                     raw_text = get_pdf_text(pdf_docs)
                     
@@ -135,7 +184,7 @@ def main():
                         vector_store = get_vector_store(text_chunks)
                         
                         if vector_store:
-                            st.success("PDF processed successfully!")
+                            st.success("PDFs processed successfully!")
             else:
                 st.warning("Please upload PDF files first.")
 
