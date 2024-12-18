@@ -1,0 +1,13 @@
+prefix=D:/pdf-summary-2/venv/Library
+exec_prefix=D:/pdf-summary-2/venv/Library
+libdir=D:/pdf-summary-2/venv/Library/lib
+sharedlibdir=D:/pdf-summary-2/venv/Library/lib
+includedir=D:/pdf-summary-2/venv/Library/include
+
+Name: zlib
+Description: zlib compression library
+Version: 1.2.13
+
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lz
+Cflags: -I${includedir}
